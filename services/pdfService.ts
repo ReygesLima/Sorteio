@@ -47,7 +47,6 @@ export const generatePDF = async (event: EventData) => {
     if (event.headerImage) {
       // --- Caso exista imagem de cabeçalho ---
       try {
-        // Tentamos adicionar a imagem. O jspdf detecta o formato pelo prefixo do base64.
         doc.addImage(event.headerImage, 'JPEG', margin, margin, contentWidth, headerHeight, undefined, 'FAST');
       } catch (err) {
         console.error("Erro ao inserir imagem no PDF, revertendo para texto", err);
@@ -112,9 +111,6 @@ export const generatePDF = async (event: EventData) => {
   doc.save(`RIFA-${cleanText(event.title).toUpperCase().replace(/\s+/g, '-')}.pdf`);
 };
 
-/**
- * Função auxiliar para desenhar o cabeçalho de texto caso não haja imagem
- */
 function drawFallbackHeader(doc: jsPDF, event: EventData, margin: number, contentWidth: number, headerHeight: number) {
   const formatCurrency = (val: number) => 
     val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -124,49 +120,78 @@ function drawFallbackHeader(doc: jsPDF, event: EventData, margin: number, conten
     return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "").trim();
   };
 
+  // Fundo do Cabeçalho
   doc.setFillColor(255, 255, 255); 
   doc.setDrawColor(220, 220, 230);
   doc.setLineWidth(0.1);
   doc.roundedRect(margin, margin, contentWidth, headerHeight, 2, 2, 'FD');
   
+  // Título Centralizado
+  const title = (cleanText(event.title).toUpperCase() || "SORTEIO");
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.text(cleanText(event.title).toUpperCase() || "SORTEIO", margin + 6, margin + 12);
+  doc.setFontSize(22);
+  const titleWidth = doc.getTextWidth(title);
+  const centerX = margin + (contentWidth / 2);
+  doc.text(title, centerX, margin + 15, { align: 'center' });
   
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.6);
-  doc.line(margin + 6, margin + 14, margin + 40, margin + 14);
+  // Linha de Destaque Centralizada
+  doc.setDrawColor(79, 70, 229); // Indigo
+  doc.setLineWidth(0.8);
+  doc.line(centerX - 20, margin + 17, centerX + 20, margin + 17);
+
+  // Espaço para Descrição Centralizada Verticalmente
+  const infoBoxHeight = 18;
+  const infoBoxY = margin + headerHeight - infoBoxHeight - 4;
+  const descAreaTop = margin + 22;
+  const descAreaBottom = infoBoxY - 2;
+  const descAreaHeight = descAreaBottom - descAreaTop;
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  const descLines = doc.splitTextToSize(cleanText(event.description) || "Sem informacoes adicionais.", contentWidth - 12);
-  doc.text(descLines, margin + 6, margin + 22);
+  doc.setFontSize(10.5);
+  doc.setTextColor(80, 80, 100);
+  
+  const descText = cleanText(event.description) || "Participe deste sorteio e concorra a premios incriveis. Preencha seus dados corretamente na cartela abaixo.";
+  const descLines = doc.splitTextToSize(descText, contentWidth - 20);
+  
+  // Cálculo de altura para centralização vertical
+  const lineHeight = 5;
+  const totalDescHeight = descLines.length * lineHeight;
+  const descStartY = descAreaTop + (descAreaHeight / 2) - (totalDescHeight / 2) + 4;
 
-  const infoBoxY = margin + headerHeight - 22;
+  doc.text(descLines, centerX, descStartY, { align: 'center', maxWidth: contentWidth - 20 });
+
+  // Quadro de Informações (Info Box)
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(margin + 3, infoBoxY, contentWidth - 6, 18, 1, 1, 'F');
+  doc.roundedRect(margin + 3, infoBoxY, contentWidth - 6, infoBoxHeight, 1, 1, 'F');
   
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
   const labelY = infoBoxY + 6;
   const valueY = infoBoxY + 12;
 
+  // Colunas do Info Box
+  const colWidth = (contentWidth - 6) / 4;
+
   doc.text("LOCAL:", margin + 6, labelY);
   doc.setFont('helvetica', 'normal');
-  doc.text(cleanText(event.location).toUpperCase() || "-", margin + 6, valueY);
+  doc.text(cleanText(event.location).toUpperCase() || "NAO INFORMADO", margin + 6, valueY);
 
   doc.setFont('helvetica', 'bold');
-  doc.text("DATA:", margin + 60, labelY);
+  doc.text("DATA:", margin + 6 + colWidth, labelY);
   doc.setFont('helvetica', 'normal');
-  doc.text(new Date(event.drawDate).toLocaleDateString(), margin + 60, valueY);
+  doc.text(new Date(event.drawDate).toLocaleDateString(), margin + 6 + colWidth, valueY);
 
   doc.setFont('helvetica', 'bold');
-  doc.text("VALOR:", margin + 105, labelY);
-  doc.text(`R$ ${formatCurrency(event.value)}`, margin + 105, valueY);
+  doc.text("VALOR:", margin + 6 + (colWidth * 2), labelY);
+  doc.setTextColor(16, 185, 129); // Emerald Green
+  doc.text(`R$ ${formatCurrency(event.value)}`, margin + 6 + (colWidth * 2), valueY);
 
+  doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
-  doc.text("PREMIO:", margin + 145, labelY);
+  doc.text("PREMIO:", margin + 6 + (colWidth * 3), labelY);
   doc.setFont('helvetica', 'normal');
-  doc.text(cleanText(event.prize).toUpperCase() || "-", margin + 145, valueY);
+  const prizeText = cleanText(event.prize).toUpperCase() || "PREMIO SURPRESA";
+  doc.text(doc.truncateText(prizeText, colWidth - 8), margin + 6 + (colWidth * 3), valueY);
 }
