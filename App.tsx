@@ -2,268 +2,347 @@
 import React, { useState, useEffect } from 'react';
 import { 
   PlusCircle, 
-  Settings, 
   Printer, 
   Trash2, 
   Calendar, 
   MapPin, 
   DollarSign, 
   Award, 
-  ChevronRight,
   LayoutGrid,
   Hash,
-  Info,
-  Copy
+  Download,
+  Table as TableIcon,
+  ChevronRight,
+  Database,
+  Search,
+  FileSpreadsheet
 } from 'lucide-react';
 import { EventData } from './types';
 import EventForm from './components/EventForm';
 import RafflePreview from './components/RafflePreview';
 import { generatePDF } from './services/pdfService';
+import { db } from './services/databaseService';
 
 const App: React.FC = () => {
   const [events, setEvents] = useState<EventData[]>([]);
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventData | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [lastConfig, setLastConfig] = useState<Partial<EventData> | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // Persistência no LocalStorage (Banco de Dados Local)
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('raffle_master_db');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setEvents(parsed);
-        if (parsed.length > 0) {
-          setSelectedEvent(parsed[0]);
-          // Guardar última config para facilitar novos registros
-          setLastConfig(parsed[0]);
-        }
-      }
-    } catch (e) {
-      console.error("Erro ao carregar banco local", e);
-    }
+    loadData();
   }, []);
 
-  const saveEvent = (data: EventData) => {
-    const updated = [data, ...events];
-    setEvents(updated);
-    localStorage.setItem('raffle_master_db', JSON.stringify(updated));
-    setLastConfig(data);
-    setIsFormOpen(false);
-    setSelectedEvent(data);
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const data = await db.getEvents();
+      setEvents(data);
+      if (data.length > 0 && !selectedEvent) {
+        setSelectedEvent(data[0]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const deleteEvent = (id: string) => {
-    if(!confirm("Deseja apagar este sorteio e todas as suas configurações?")) return;
-    const updated = events.filter(e => e.id !== id);
-    setEvents(updated);
-    localStorage.setItem('raffle_master_db', JSON.stringify(updated));
-    if (selectedEvent?.id === id) setSelectedEvent(updated.length > 0 ? updated[0] : null);
+  const saveEvent = async (data: EventData) => {
+    try {
+      await db.saveEvent(data);
+      await loadData();
+      setIsFormOpen(false);
+      setSelectedEvent(data);
+    } catch (e) {
+      alert("Erro ao salvar no banco local.");
+    }
+  };
+
+  const deleteEvent = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if(!confirm("Deseja apagar permanentemente este sorteio?")) return;
+    try {
+      await db.deleteEvent(id);
+      const updated = events.filter(ev => ev.id !== id);
+      setEvents(updated);
+      if (selectedEvent?.id === id) {
+        setSelectedEvent(updated.length > 0 ? updated[0] : null);
+      }
+    } catch (e) {
+      alert("Erro ao remover.");
+    }
   };
 
   const handlePrint = async (event: EventData) => {
     setIsProcessing(true);
-    setTimeout(async () => {
-      try {
-        await generatePDF(event);
-      } catch (error) {
-        console.error("Erro no PDF", error);
-        alert("Erro ao gerar o documento. Verifique as permissões de download.");
-      } finally {
-        setIsProcessing(false);
-      }
-    }, 600);
+    try {
+      await generatePDF(event);
+    } catch (error) {
+      alert("Erro ao gerar PDF.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const duplicateEvent = (event: EventData) => {
-    setLastConfig(event);
-    setIsFormOpen(true);
+  const exportToCSV = () => {
+    if (events.length === 0) return;
+    const headers = ["Título", "Local", "Data Sorteio", "Valor", "Prêmio", "Cartelas"];
+    const rows = events.map(e => [
+      e.title,
+      e.location,
+      new Date(e.drawDate).toLocaleDateString(),
+      e.value.toFixed(2),
+      e.prize,
+      `${e.initialSeq} a ${e.finalSeq}`
+    ]);
+
+    const csvContent = [headers, ...rows].map(r => r.join(";")).join("\n");
+    const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `rifas_export_${new Date().toISOString().slice(0,10)}.csv`);
+    link.click();
   };
+
+  const filteredEvents = events.filter(e => 
+    e.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    e.prize.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
-    <div className="min-h-screen bg-[#0f1021] text-slate-100 p-4 md:p-10 selection:bg-indigo-500/30">
-      {/* Header Principal */}
-      <header className="max-w-7xl mx-auto mb-12 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="flex items-center gap-5">
-          <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[1.25rem] flex items-center justify-center shadow-2xl shadow-indigo-500/40 border border-white/10">
-            <Award className="text-white" size={32} />
+    <div className="min-h-screen bg-[#0a0b14] text-slate-100 p-4 md:p-8">
+      {/* Header */}
+      <header className="max-w-7xl mx-auto mb-10 flex flex-col md:flex-row justify-between items-center gap-6">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-500/20">
+            <Award size={32} className="text-white" />
           </div>
           <div>
-            <h1 className="text-4xl font-black tracking-tighter text-white">RAFFLE MASTER</h1>
-            <p className="text-indigo-400 text-xs font-black uppercase tracking-[0.2em]">Sorteios Profissionais v2.5</p>
+            <h1 className="text-3xl font-black tracking-tighter">RAFFLE MASTER</h1>
+            <p className="text-indigo-400 text-[10px] font-black uppercase tracking-[0.2em]">Gestão de Sorteios v2.0</p>
           </div>
         </div>
-        <button 
-          onClick={() => setIsFormOpen(true)}
-          className="group flex items-center gap-3 bg-white text-slate-900 px-10 py-5 rounded-[1.5rem] font-black transition-all hover:bg-indigo-50 hover:shadow-2xl hover:shadow-white/10 active:scale-95"
-        >
-          <PlusCircle size={22} className="group-hover:rotate-90 transition-transform duration-300" />
-          CRIAR NOVO EVENTO
-        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10">
+            <button 
+              onClick={() => setViewMode('cards')}
+              className={`p-3 rounded-xl transition-all ${viewMode === 'cards' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+            >
+              <LayoutGrid size={20} />
+            </button>
+            <button 
+              onClick={() => setViewMode('table')}
+              className={`p-3 rounded-xl transition-all ${viewMode === 'table' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+            >
+              <TableIcon size={20} />
+            </button>
+          </div>
+          
+          <button 
+            onClick={exportToCSV}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-5 py-3 rounded-2xl font-bold text-sm transition-all"
+          >
+            <FileSpreadsheet size={18} className="text-emerald-400" />
+            <span className="hidden sm:inline">Exportar Planilha</span>
+          </button>
+
+          <button 
+            onClick={() => setIsFormOpen(true)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-2xl font-black text-sm shadow-xl shadow-indigo-600/20 transition-all active:scale-95"
+          >
+            <PlusCircle size={20} />
+            NOVO SORTEIO
+          </button>
+        </div>
       </header>
 
-      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Barra Lateral de Eventos */}
-        <aside className="lg:col-span-3 space-y-4">
-          <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2 px-2">
-            <LayoutGrid size={12} /> BANCO DE DADOS LOCAL
-          </h2>
-          <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-2 custom-scrollbar">
-            {events.length === 0 ? (
-              <div className="bg-white/[0.02] border-2 border-dashed border-white/5 rounded-[2rem] p-10 text-center opacity-40">
-                <Info className="mx-auto mb-2 opacity-20" size={32} />
-                <p className="text-[10px] font-black uppercase tracking-widest">Sem Eventos</p>
-              </div>
-            ) : (
-              events.map(event => (
-                <div 
-                  key={event.id}
-                  onClick={() => setSelectedEvent(event)}
-                  className={`relative p-6 rounded-[2rem] cursor-pointer transition-all border group ${
-                    selectedEvent?.id === event.id 
-                      ? 'bg-indigo-600 border-indigo-500 shadow-2xl shadow-indigo-600/30 translate-x-1' 
-                      : 'bg-white/[0.02] border-white/5 hover:border-white/10 hover:bg-white/[0.04]'
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className={`font-black text-sm truncate leading-tight w-full ${selectedEvent?.id === event.id ? 'text-white' : 'text-slate-200'}`}>
-                      {event.title}
-                    </h3>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); duplicateEvent(event); }}
-                        title="Usar como base"
-                        className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
-                      >
-                        <Copy size={14} />
-                      </button>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); deleteEvent(event.id); }}
-                        className="p-1.5 hover:bg-red-500/20 rounded-lg text-slate-400 hover:text-red-400"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className={`text-[10px] font-black uppercase tracking-wider ${selectedEvent?.id === event.id ? 'text-indigo-200' : 'text-slate-500'}`}>
-                    {new Date(event.drawDate).toLocaleDateString()} • {event.finalSeq - event.initialSeq + 1} CARTELAS
-                  </div>
-                </div>
-              ))
-            )}
+      <main className="max-w-7xl mx-auto">
+        {isLoading ? (
+          <div className="h-64 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
           </div>
-        </aside>
-
-        {/* Painel Central */}
-        <section className="lg:col-span-9 space-y-8">
-          {selectedEvent ? (
-            <>
-              {/* Cabeçalho do Evento - Estilo Referência */}
-              <div className="bg-[#1a1b3a] rounded-[3rem] p-10 md:p-14 shadow-2xl border border-white/5 relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 blur-[120px] rounded-full -mr-32 -mt-32 transition-all group-hover:bg-indigo-500/20"></div>
-                
-                <div className="relative z-10">
-                  <div className="flex flex-wrap items-center gap-3 mb-6">
-                     <span className="bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase tracking-[0.2em] px-4 py-1.5 rounded-full border border-indigo-500/20">RIFA ATIVA</span>
-                     <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black uppercase tracking-[0.2em] px-4 py-1.5 rounded-full border border-emerald-500/20">VERIFICADO</span>
-                  </div>
-
-                  <h2 className="text-4xl md:text-6xl font-black text-white mb-8 leading-[1.1] tracking-tighter">
-                    {selectedEvent.title}
-                  </h2>
-                  
-                  <div className="max-w-3xl mb-14">
-                    <p className="text-slate-400 text-lg md:text-xl leading-relaxed font-medium whitespace-pre-wrap">
-                      {selectedEvent.description}
-                    </p>
-                  </div>
-
-                  {/* Cards de Informação */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-12">
-                    <div className="bg-white/[0.03] rounded-[2rem] p-7 border border-white/5 flex flex-col justify-center transition-all hover:bg-white/[0.05]">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2"><MapPin size={10}/> LOCAL</span>
-                      <span className="text-xl font-black text-white truncate">{selectedEvent.location}</span>
-                    </div>
-                    <div className="bg-white/[0.03] rounded-[2rem] p-7 border border-white/5 flex flex-col justify-center transition-all hover:bg-white/[0.05]">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2"><Calendar size={10}/> DATA SORTEIO</span>
-                      <span className="text-xl font-black text-white">{new Date(selectedEvent.drawDate).toLocaleDateString()}</span>
-                    </div>
-                    <div className="bg-white/[0.03] rounded-[2rem] p-7 border border-white/5 flex flex-col justify-center transition-all hover:bg-white/[0.05]">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2"><DollarSign size={10}/> VALOR UNIT.</span>
-                      <span className="text-xl font-black text-emerald-400 uppercase">R$ {selectedEvent.value.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                    </div>
-                    <div className="bg-white/[0.03] rounded-[2rem] p-7 border border-white/5 flex flex-col justify-center transition-all hover:bg-white/[0.05]">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2"><Hash size={10}/> SEQUÊNCIA</span>
-                      <span className="text-xl font-black text-indigo-400">{selectedEvent.initialSeq} a {selectedEvent.finalSeq}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row items-center gap-6 pt-6 border-t border-white/5">
-                    <button 
-                      onClick={() => handlePrint(selectedEvent)}
-                      disabled={isProcessing}
-                      className={`w-full sm:w-auto flex items-center justify-center gap-4 px-12 py-6 rounded-[1.75rem] font-black transition-all shadow-2xl active:scale-95 disabled:cursor-not-allowed ${
-                        isProcessing 
-                        ? 'animate-shimmer animate-pulse text-slate-700 shadow-indigo-500/20' 
-                        : 'bg-white text-slate-950 hover:bg-slate-200 shadow-white/5'
-                      }`}
-                    >
-                      {isProcessing ? (
-                        <>
-                          <div className="animate-spin rounded-full h-6 w-6 border-3 border-slate-900 border-t-transparent" />
-                          GERANDO DOCUMENTO...
-                        </>
-                      ) : (
-                        <><Printer size={22} /> PROCESSAR E GERAR PDF</>
-                      )}
-                    </button>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">Status de Processamento</span>
-                      <span className={`text-sm font-bold uppercase ${isProcessing ? 'text-indigo-400 animate-pulse' : 'text-slate-300'}`}>
-                        {isProcessing ? 'Construindo PDF de alta qualidade...' : `Pronto para impressão • ${selectedEvent.finalSeq - selectedEvent.initialSeq + 1} unidades`}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Grid de Visualização */}
-              <div className="bg-[#1a1b3a]/40 rounded-[3rem] p-10 border border-white/5">
-                <div className="flex justify-between items-center mb-10">
-                  <h3 className="text-2xl font-black flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center border border-white/5 shadow-inner">
-                      <LayoutGrid size={24} className="text-indigo-400" />
-                    </div>
-                    Painel de Pré-Impressão
-                  </h3>
-                  <div className="hidden md:flex items-center gap-2 text-[10px] font-black text-indigo-400 bg-indigo-500/5 px-5 py-2.5 rounded-full border border-indigo-500/20 uppercase tracking-widest">
-                    <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span> Visualizando Cartelas Finais
-                  </div>
-                </div>
-                <RafflePreview event={selectedEvent} />
-              </div>
-            </>
-          ) : (
-            <div className="h-[70vh] flex flex-col items-center justify-center text-center p-16 bg-white/[0.01] rounded-[4rem] border-4 border-dashed border-white/[0.03] group transition-all hover:bg-white/[0.02]">
-              <div className="w-32 h-32 bg-white/5 rounded-[2.5rem] flex items-center justify-center mb-8 shadow-2xl transition-transform group-hover:scale-110 group-hover:rotate-12">
-                <Settings size={56} className="text-slate-800" />
-              </div>
-              <h2 className="text-3xl font-black text-slate-600 mb-4 uppercase tracking-tighter">Painel em Espera</h2>
-              <p className="text-slate-700 max-w-sm font-black uppercase text-[11px] tracking-[0.3em] leading-relaxed">
-                Nenhum evento ativo. Comece criando um novo sorteio ou selecione um do banco local para gerar o material.
-              </p>
+        ) : events.length === 0 ? (
+          <div className="bg-white/5 border-2 border-dashed border-white/10 rounded-[3rem] p-20 text-center">
+            <Database size={64} className="mx-auto text-slate-700 mb-6" />
+            <h2 className="text-2xl font-bold text-slate-400 mb-2">Nenhum sorteio encontrado</h2>
+            <p className="text-slate-500 mb-8">Comece criando seu primeiro evento de rifa.</p>
+            <button 
+              onClick={() => setIsFormOpen(true)}
+              className="bg-white text-indigo-900 px-8 py-4 rounded-2xl font-black uppercase text-xs tracking-widest hover:scale-105 transition-all"
+            >
+              Criar Agora
+            </button>
+          </div>
+        ) : viewMode === 'table' ? (
+          /* Modo Planilha */
+          <div className="bg-white/5 border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-white/10 bg-white/[0.02] flex flex-col md:flex-row justify-between gap-4">
+               <div className="relative flex-1 max-w-md">
+                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                 <input 
+                   placeholder="Pesquisar sorteios..."
+                   className="w-full bg-black/20 border border-white/10 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-indigo-500 text-sm"
+                   value={searchTerm}
+                   onChange={e => setSearchTerm(e.target.value)}
+                 />
+               </div>
             </div>
-          )}
-        </section>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-white/5 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    <th className="px-8 py-5">Título / Evento</th>
+                    <th className="px-8 py-5">Data</th>
+                    <th className="px-8 py-5 text-right">Valor Unit.</th>
+                    <th className="px-8 py-5">Prêmio</th>
+                    <th className="px-8 py-5">Sequência</th>
+                    <th className="px-8 py-5 text-center">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.05]">
+                  {filteredEvents.map(event => (
+                    <tr key={event.id} className="hover:bg-white/[0.02] transition-colors group">
+                      <td className="px-8 py-6">
+                        <div className="font-bold text-white">{event.title}</div>
+                        <div className="text-xs text-slate-500 mt-1 flex items-center gap-1"><MapPin size={10}/> {event.location}</div>
+                      </td>
+                      <td className="px-8 py-6 text-sm font-medium text-slate-400">
+                        {new Date(event.drawDate).toLocaleDateString()}
+                      </td>
+                      <td className="px-8 py-6 text-right font-black text-emerald-400">
+                        R$ {event.value.toFixed(2)}
+                      </td>
+                      <td className="px-8 py-6 text-sm text-slate-300">
+                        <div className="flex items-center gap-2">
+                          <Award size={14} className="text-indigo-400" />
+                          {event.prize}
+                        </div>
+                      </td>
+                      <td className="px-8 py-6 text-xs font-bold text-indigo-300">
+                        {event.initialSeq} - {event.finalSeq}
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="flex justify-center gap-3">
+                          <button 
+                            onClick={() => handlePrint(event)}
+                            className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"
+                            title="Gerar PDF"
+                          >
+                            <Printer size={18} />
+                          </button>
+                          <button 
+                            onClick={(e) => deleteEvent(event.id, e)}
+                            className="p-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl transition-all"
+                            title="Excluir"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          /* Modo Cartões */
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <aside className="lg:col-span-3 space-y-4">
+              <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-2">SELECIONAR RIFA</h2>
+              <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
+                {events.map(event => (
+                  <div 
+                    key={event.id}
+                    onClick={() => setSelectedEvent(event)}
+                    className={`p-6 rounded-[2rem] cursor-pointer transition-all border ${
+                      selectedEvent?.id === event.id 
+                        ? 'bg-indigo-600 border-indigo-400 shadow-xl shadow-indigo-600/20 scale-[1.02]' 
+                        : 'bg-white/5 border-white/5 hover:border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    <h3 className="font-bold text-sm truncate mb-1">{event.title}</h3>
+                    <div className="text-[10px] font-black uppercase tracking-wider opacity-60">
+                      {new Date(event.drawDate).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </aside>
+
+            <section className="lg:col-span-9 space-y-6">
+              {selectedEvent && (
+                <>
+                  <div className="bg-[#15162b] rounded-[3rem] p-10 border border-white/10 shadow-2xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600/10 blur-[100px] rounded-full -mr-20 -mt-20"></div>
+                    
+                    <div className="relative z-10">
+                      <h2 className="text-4xl font-black mb-4 tracking-tighter">{selectedEvent.title}</h2>
+                      <p className="text-slate-400 mb-8 max-w-2xl leading-relaxed">{selectedEvent.description}</p>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+                        <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
+                          <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Valor</div>
+                          <div className="text-xl font-black text-emerald-400">R$ {selectedEvent.value.toFixed(2)}</div>
+                        </div>
+                        <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
+                          <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Data</div>
+                          <div className="text-xl font-black">{new Date(selectedEvent.drawDate).toLocaleDateString()}</div>
+                        </div>
+                        <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
+                          <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Prêmio</div>
+                          <div className="text-xl font-black truncate">{selectedEvent.prize}</div>
+                        </div>
+                        <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
+                          <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Cartelas</div>
+                          <div className="text-xl font-black">{selectedEvent.finalSeq - selectedEvent.initialSeq + 1}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-4">
+                        <button 
+                          onClick={() => handlePrint(selectedEvent)}
+                          disabled={isProcessing}
+                          className={`flex-1 md:flex-none flex items-center justify-center gap-3 px-10 py-5 rounded-2xl font-black transition-all ${
+                            isProcessing ? 'bg-slate-700 animate-pulse' : 'bg-white text-indigo-950 hover:bg-slate-200 shadow-xl'
+                          }`}
+                        >
+                          {isProcessing ? 'GERANDO PDF...' : <><Printer size={20} /> GERAR PDF AGORA</>}
+                        </button>
+                        <button 
+                          onClick={() => deleteEvent(selectedEvent.id)}
+                          className="p-5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl border border-red-500/10 transition-all"
+                        >
+                          <Trash2 size={24} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white/5 rounded-[3rem] p-10 border border-white/10">
+                    <h3 className="text-xl font-black mb-8 flex items-center gap-3">
+                      <LayoutGrid className="text-indigo-400" /> Pré-visualização
+                    </h3>
+                    <RafflePreview event={selectedEvent} />
+                  </div>
+                </>
+              )}
+            </section>
+          </div>
+        )}
       </main>
 
       {/* Modal Form */}
       {isFormOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10 bg-slate-950/95 backdrop-blur-3xl">
-          <div className="w-full max-w-3xl animate-in zoom-in duration-300 ease-out">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-[3rem] shadow-2xl animate-in zoom-in duration-200">
              <EventForm 
-               initialData={lastConfig || undefined}
                onSave={saveEvent} 
                onClose={() => setIsFormOpen(false)} 
              />
